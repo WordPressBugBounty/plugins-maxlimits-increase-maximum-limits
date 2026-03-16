@@ -1,0 +1,1463 @@
+<?php
+
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+class MaxLimits_Admin
+{
+
+    private $core;
+    private $menu_slug = 'maxlimits-increase-maximum-limits';
+
+    public function __construct()
+    {
+        $this->core = MaxLimits_Core::instance();
+
+        add_action('admin_menu', [$this, 'add_admin_menu']);
+        add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
+        add_action('wp_ajax_maxlimits_save_settings', [$this, 'ajax_save_settings']);
+        add_action('wp_ajax_maxlimits_get_server_limits', [$this, 'ajax_get_server_limits']);
+
+        // Tracking Hooks
+        add_action('admin_notices', [$this, 'render_tracking_notice']);
+        add_action('wp_ajax_maxlimits_tracking_consent', [$this, 'ajax_handle_tracking_consent']);
+
+        add_action('wp_dashboard_setup', [$this, 'register_dashboard_widget']);
+        add_action('rest_api_init', [$this, 'register_rest_routes']);
+    }
+
+    /**
+     * Register REST API routes for Other Plugins proxy.
+     */
+    public function register_rest_routes()
+    {
+        register_rest_route('maxlimits/v1', '/other-plugins', [
+            'methods'  => 'GET',
+            'callback' => [$this, 'get_other_plugins_proxy'],
+            'permission_callback' => function () {
+                return current_user_can('manage_options');
+            }
+        ]);
+    }
+
+    /**
+     * Proxy for DominoPress plugins list.
+     */
+    public function get_other_plugins_proxy()
+    {
+        $transient_key = 'maxlimits_other_plugins_cache';
+        $cached_data   = get_transient($transient_key);
+
+        if (false !== $cached_data) {
+            return rest_ensure_response($cached_data);
+        }
+
+        $response = wp_remote_get('https://dominopress.com/api/wp-plugins', [
+            'timeout'   => 15,
+            'sslverify' => false,
+        ]);
+
+        if (is_wp_error($response)) {
+            return new WP_Error('fetch_failed', 'Failed to fetch plugins from DominoPress', ['status' => 500]);
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+
+        if (empty($data) || !isset($data['success'])) {
+            return new WP_Error('invalid_data', 'Invalid response from DominoPress API', ['status' => 500]);
+        }
+
+        set_transient($transient_key, $data, 12 * HOUR_IN_SECONDS);
+        return rest_ensure_response($data);
+    }
+
+    public function add_admin_menu()
+    {
+        add_menu_page(
+            __('MaxLimits Settings', 'maxlimits-increase-maximum-limits'),
+            __('MaxLimits', 'maxlimits-increase-maximum-limits'),
+            'manage_options',
+            $this->menu_slug,
+            [$this, 'render_page'],
+            'dashicons-performance' // Icon
+        );
+
+        add_submenu_page(
+            $this->menu_slug,
+            __('Increase Limits', 'maxlimits-increase-maximum-limits'),
+            __('Increase Limits', 'maxlimits-increase-maximum-limits'),
+            'manage_options',
+            $this->menu_slug,
+            [$this, 'render_page']
+        );
+
+        add_submenu_page(
+            $this->menu_slug,
+            __('Emergency Recovery', 'maxlimits-increase-maximum-limits'),
+            __('Emergency Recovery', 'maxlimits-increase-maximum-limits'),
+            'manage_options',
+            'maxlimits-recovery',
+            [$this, 'render_recovery_upsell_page']
+        );
+
+        add_submenu_page(
+            $this->menu_slug,
+            __('Other Plugins', 'maxlimits-increase-maximum-limits'),
+            __('Other Plugins', 'maxlimits-increase-maximum-limits'),
+            'manage_options',
+            'maxlimits-other-plugins',
+            [$this, 'render_other_plugins_page']
+        );
+    }
+
+    public function enqueue_assets($hook)
+    {
+        $screen = get_current_screen();
+        if (!$screen || strpos($screen->id, 'maxlimits') === false) {
+            if ($hook === 'plugins.php') {
+                wp_enqueue_script('maxlimits-deactivation', plugins_url('../assets/js/admin-deactivation.js', __FILE__), ['jquery'], MAXLIMITS_VERSION, true);
+            }
+            return;
+        }
+
+        wp_enqueue_style('maxlimits-admin', plugins_url('../assets/css/admin.css', __FILE__), [], MAXLIMITS_VERSION);
+        wp_enqueue_script('maxlimits-admin', plugins_url('../assets/js/admin.js', __FILE__), ['jquery'], MAXLIMITS_VERSION, true);
+
+        // Localize params for ALL our pages
+        wp_localize_script('maxlimits-admin', 'maxlimitsParams', [
+            'ajaxurl' => admin_url('admin-ajax.php'),
+            'nonce'   => wp_create_nonce('maxlimits-nonce')
+        ]);
+    }
+
+
+    /**
+     * Renders the unified premium header for all plugin pages.
+     */
+    private function render_common_header()
+    {
+        ?>
+        <div class="maxlimits-header" style="padding-bottom: 25px; margin-bottom: 2.5rem; border-bottom: 1px solid rgba(0,0,0,0.06); display: flex; justify-content: space-between; align-items: center;">
+            <div class="maxlimits-brand" style="display: flex; align-items: center; gap: 18px;">
+                <!-- Modern Premium Logo Icon -->
+                <div class="maxlimits-logo-modern" style="
+                    position: relative;
+                    width: 48px; 
+                    height: 48px; 
+                    background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); 
+                    border-radius: 14px; 
+                    display: flex; 
+                    align-items: center; 
+                    justify-content: center; 
+                    color: #fff; 
+                    font-weight: 900; 
+                    font-size: 26px; 
+                    box-shadow: 0 4px 20px rgba(124, 58, 237, 0.4);
+                    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                    flex-shrink: 0;
+                    overflow: hidden;
+                ">
+                    M
+                    <div class="maxlimits-shimmer-effect"></div>
+                </div>
+
+                
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="
+                            font-size: 26px; 
+                            font-weight: 900; 
+                            color: #0f172a; 
+                            letter-spacing: -0.04em; 
+                            line-height: 1;
+                            background: linear-gradient(90deg, #1e293b, #475569);
+                            -webkit-background-clip: text;
+                            -webkit-text-fill-color: transparent;
+                        ">MaxLimits</span>
+                        <span style="
+                            font-size: 11px; 
+                            font-weight: 800; 
+                            background: #f1f5f9; 
+                            color: #64748b; 
+                            padding: 2px 10px; 
+                            border-radius: 100px; 
+                            text-transform: uppercase; 
+                            letter-spacing: 0.1em;
+                            border: 1px solid rgba(0,0,0,0.1);
+                        ">Free</span>
+                    </div>
+                    <a href="https://dominopress.com" target="_blank" style="font-size: 13px; color: #94a3b8; text-decoration: none; font-weight: 600; letter-spacing: 0.01em; display: flex; align-items: center; gap: 4px;">
+                        <?php _e('by', 'maxlimits-increase-maximum-limits'); ?> 
+                        <span style="color: #64748b; font-weight: 700;">DominoPress</span>
+                    </a>
+                </div>
+            </div>
+            
+            <div class="maxlimits-header-actions" style="display: flex; gap: 12px; align-items: center;">
+                <a href="https://dominopress.com/plugin/maxlimits" target="_blank" class="btn-upgrade-pro" style="
+                    height: 42px; 
+                    padding: 0 20px; 
+                    display: inline-flex; 
+                    align-items: center; 
+                    gap: 8px; 
+                    border-radius: 10px; 
+                    font-weight: 700; 
+                    font-size: 13px; 
+                    background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%); 
+                    color: #fff; 
+                    text-decoration: none;
+                    transition: all 0.2s;
+                    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+                ">
+                    <span class="dashicons dashicons-star-filled" style="font-size: 16px; width: 16px; height: 16px;"></span>
+                    <?php _e('Upgrade to PRO', 'maxlimits-increase-maximum-limits'); ?> 
+                </a>
+                <a href="https://dominopress.com/plugins" target="_blank" class="button button-secondary" style="
+                    height: 42px; 
+                    padding: 0 20px; 
+                    display: inline-flex; 
+                    align-items: center; 
+                    gap: 8px; 
+                    border-radius: 10px; 
+                    font-weight: 700; 
+                    font-size: 13px; 
+                    background: #fff; 
+                    color: #475569; 
+                    border: 1px solid rgba(0,0,0,0.1);
+                    transition: all 0.2s;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+                ">
+                    <?php _e('Our Other Plugins', 'maxlimits-increase-maximum-limits'); ?> 
+                    <span class="dashicons dashicons-external" style="font-size: 16px; width: 16px; height: 16px; margin-top: 2px;"></span>
+                </a>
+            </div>
+        </div>
+        <?php
+    }
+
+
+    public function render_page()
+    {
+        $limits = get_option($this->core->limit_option_name, []);
+        $advanced = get_option($this->core->advanced_option_name, []);
+        $options_def = $this->core->get_limit_options();
+
+        // Generate code snippets for display
+        $snippets = $this->core->get_ini_code_snippets($limits);
+        ?>
+        <div class="wrap maxlimits-wrap">
+            <?php $this->render_common_header(); ?>
+
+            <div class="maxlimits-container">
+
+                <!-- Main Settings Column -->
+                <div class="maxlimits-main">
+                    
+                    <?php
+                    // Detect conflicts
+                    $htaccess = get_home_path() . '.htaccess';
+                    $user_ini = ABSPATH . '.user.ini';
+                    $has_conflicts = false;
+                    foreach ([$htaccess, $user_ini ] as $f) {
+                        if (file_exists($f) && is_readable($f)) {
+                            $c = file_get_contents($f);
+                            if (strpos($c, 'MaxLimits Emergency Recovery') !== false || strpos($c, 'MaxLimits Manual Recovery') !== false) {
+                                $has_conflicts = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if ($has_conflicts): ?>
+                        <div class="maxlimits-card" style="border-left: 4px solid #f59e0b; background: #fffbeb; margin-bottom: 24px; padding: 20px;">
+                            <div style="display: flex; gap: 12px; align-items: center;">
+                                <span class="dashicons dashicons-warning" style="color: #d97706; font-size: 24px; width: 24px; height: 24px;"></span>
+                                <div>
+                                    <h4 style="margin: 0; color: #92400e; font-size: 15px; font-weight: 700;"><?php _e('Legacy Settings Conflict Detected', 'maxlimits-increase-maximum-limits'); ?></h4>
+                                    <p style="margin: 4px 0 0; color: #b45309; font-size: 13px;">
+                                        <?php _e('Some "Emergency Recovery" or legacy rules are currently active in your server configuration (1024MB), which are overriding your dashboard choices. Click "Save Limits" below to purge these conflicts and apply your new settings.', 'maxlimits-increase-maximum-limits'); ?>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+
+                    <form id="maxlimits-main-form">
+
+                        <!-- 1-Click Optimizers Card -->
+                        <div class="maxlimits-card maxlimits-optimizers-card" style="border-top: 4px solid #10b981;">
+                            <div class="maxlimits-card-header">
+                                <h2><span class="dashicons dashicons-superhero" style="color: #10b981; margin-right: 8px;"></span><?php _e('1-Click Optimizers', 'maxlimits-increase-maximum-limits'); ?></h2>
+                            </div>
+                            <div class="maxlimits-card-body">
+                                <p class="description" style="margin-top: 0; margin-bottom: 15px;">
+                                    <?php _e('Instantly apply the most recommended limits for your specific setup. Click a button below to auto-fill the best values.', 'maxlimits-increase-maximum-limits'); ?>
+                                </p>
+                                <div class="maxlimits-preset-buttons" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                    <button type="button" class="button preset-btn" data-preset="standard" style="display: flex; align-items: center; gap: 5px;">
+                                        <span class="dashicons dashicons-wordpress"></span> <?php _e('Standard Site', 'maxlimits-increase-maximum-limits'); ?>
+                                    </button>
+                                    <button type="button" class="button preset-btn" data-preset="woocommerce" data-pro="true" style="display: flex; align-items: center; gap: 5px; color: #7b2cb8; border-color: #7b2cb8;">
+                                        <span class="dashicons dashicons-cart"></span> <?php _e('WooCommerce (PRO)', 'maxlimits-increase-maximum-limits'); ?>
+                                    </button>
+                                    <button type="button" class="button preset-btn" data-preset="pagebuilder" data-pro="true" style="display: flex; align-items: center; gap: 5px; color: #d94f4f; border-color: #d94f4f;">
+                                        <span class="dashicons dashicons-grid-view"></span> <?php _e('Elementor / Divi (PRO)', 'maxlimits-increase-maximum-limits'); ?>
+                                    </button>
+                                    <button type="button" class="button preset-btn" data-preset="maximum" data-pro="true" style="display: flex; align-items: center; gap: 5px; color: #b91c1c; border-color: #b91c1c;">
+                                        <span class="dashicons dashicons-warning"></span> <?php _e('Maximum Power (PRO)', 'maxlimits-increase-maximum-limits'); ?>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Limits Card -->
+                        <div class="maxlimits-card">
+                            <div class="maxlimits-card-header">
+                                <h2><?php _e('Resource Limits', 'maxlimits-increase-maximum-limits'); ?></h2>
+                            </div>
+                            <div class="maxlimits-card-body">
+                                <?php
+                                $fields = [
+                                    'upload_max_filesize' => ['label' => __('Max Upload File Size', 'maxlimits-increase-maximum-limits'), 'desc' => __('Limit for files uploaded via Media Library.', 'maxlimits-increase-maximum-limits')],
+                                    'post_max_size' => ['label' => __('Max Post Size', 'maxlimits-increase-maximum-limits'), 'desc' => __('Limit for total POST data size.', 'maxlimits-increase-maximum-limits')],
+                                    'memory_limit' => ['label' => __('PHP Memory Limit', 'maxlimits-increase-maximum-limits'), 'desc' => __('Max memory a script can allocate.', 'maxlimits-increase-maximum-limits')],
+                                    'max_execution_time' => ['label' => __('Max Execution Time', 'maxlimits-increase-maximum-limits'), 'desc' => __('Max time a script can run (seconds).', 'maxlimits-increase-maximum-limits')],
+                                    'max_input_time' => ['label' => __('Max Input Time', 'maxlimits-increase-maximum-limits'), 'desc' => __('Max time to parse input data.', 'maxlimits-increase-maximum-limits')],
+                                    'max_input_vars' => ['label' => __('Max Input Vars', 'maxlimits-increase-maximum-limits'), 'desc' => __('Max variables accepted.', 'maxlimits-increase-maximum-limits')],
+                                ];
+
+                                foreach ($fields as $key => $meta) {
+                                    $this->render_field($key, $meta, $limits, $options_def[$key]);
+                                }
+                                ?>
+                            </div>
+                        </div>
+
+                        <!-- Advanced Card -->
+                        <div class="maxlimits-card">
+                            <div class="maxlimits-card-header">
+                                <h2><?php _e('Advanced Configuration', 'maxlimits-increase-maximum-limits'); ?></h2>
+                            </div>
+                            <div class="maxlimits-card-body">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+                                    <div>
+                                        <strong><?php _e('Direct .htaccess Writing', 'maxlimits-increase-maximum-limits'); ?></strong>
+                                        <p class="description" style="margin-top: 5px;"><?php _e('Write rules directly to your .htaccess file. Use this if the default method doesn\'t work.', 'maxlimits-increase-maximum-limits'); ?></p>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="write_to_htaccess" value="1" <?php checked($advanced['write_to_htaccess'] ?? 0, 1); ?>>
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start; border-top: 1px solid #e2e8f0; padding-top: 20px;">
+                                    <div>
+                                        <strong><?php _e('Direct wp-config.php Injection', 'maxlimits-increase-maximum-limits'); ?></strong>
+                                        <p class="description" style="margin-top: 5px;"><?php _e('Inject memory limits directly into your wp-config.php file. This is the most reliable method for memory limits.', 'maxlimits-increase-maximum-limits'); ?></p>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="write_to_wpconfig" value="1" <?php checked($advanced['write_to_wpconfig'] ?? 0, 1); ?>>
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="action-bar">
+                            <button type="submit" class="btn-primary submit-btn">
+                                <span class="spinner-icon"></span>
+                                <span class="text"><?php _e('Save Changes', 'maxlimits-increase-maximum-limits'); ?></span>
+                            </button>
+                        </div>
+
+                    </form>
+
+                    <!-- Manual Code Generator -->
+                    <div class="maxlimits-card" style="margin-top: 2rem;">
+                        <div class="maxlimits-card-header">
+                            <h2><?php _e('Manual Configuration', 'maxlimits-increase-maximum-limits'); ?></h2>
+                        </div>
+                        <div class="tab-nav">
+                            <button class="tab-btn active" data-target="tab-user-ini">.user.ini</button>
+                            <button class="tab-btn" data-target="tab-htaccess">.htaccess</button>
+                        </div>
+                        <div id="tab-user-ini" class="tab-content active">
+                            <p class="description">
+                                <?php _e('Add this to your .user.ini file if settings don\'t apply.', 'maxlimits-increase-maximum-limits'); ?>
+                            </p>
+                            <textarea class="code-block" readonly
+                                onclick="this.select()"><?php echo esc_textarea($snippets['user_ini']); ?></textarea>
+                        </div>
+                        <div id="tab-htaccess" class="tab-content">
+                            <p class="description">
+                                <?php _e('Add this to your .htaccess file for Apache servers.', 'maxlimits-increase-maximum-limits'); ?>
+                            </p>
+                            <textarea class="code-block" readonly
+                                onclick="this.select()"><?php echo esc_textarea($snippets['htaccess']); ?></textarea>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Sidebar -->
+                <div class="maxlimits-sidebar">
+
+                    <!-- Rating Widget -->
+                    <div class="maxlimits-card" style="background: linear-gradient(135deg, #f0f9ff, #e0f2fe);">
+                        <div class="maxlimits-card-body" style="text-align: center;">
+                            <h3 style="margin-top:0; color: #0284c7;">
+                                <?php _e('Love MaxLimits?', 'maxlimits-increase-maximum-limits'); ?>
+                            </h3>
+                            <p style="font-size: 13px; color: #334155; margin-bottom: 1rem;">
+                                <?php _e('Please rate us 5 stars on WordPress.org to help us grow!', 'maxlimits-increase-maximum-limits'); ?>
+                            </p>
+                            <a href="https://wordpress.org/support/plugin/maxlimits-increase-maximum-limits/reviews/#new-post"
+                                target="_blank" class="btn-secondary"
+                                style="width:100%; display:block; text-align:center; box-sizing: border-box;">
+                                <?php _e('Rate Plugin ★★★★★', 'maxlimits-increase-maximum-limits'); ?>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Server Values Widget -->
+                    <div class="maxlimits-card sidebar-status-card">
+                        <div class="maxlimits-card-header">
+                            <h2 style="display: flex; align-items: center; gap: 8px;">
+                                <span class="dashicons dashicons-dashboard" style="color: var(--ml-accent);"></span>
+                                <?php _e('Live Server Status', 'maxlimits-increase-maximum-limits'); ?>
+                            </h2>
+                        </div>
+                        <div class="maxlimits-card-body">
+                            <div id="maxlimits-server-values">
+                                <?php echo $this->get_server_limits_html(false); ?>
+                            </div>
+
+                            <div class="maxlimits-status-hint">
+                                <div class="hint-icon">
+                                    <span class="dashicons dashicons-info"></span>
+                                </div>
+                                <div class="hint-content">
+                                    <strong><?php _e('Values not updating?', 'maxlimits-increase-maximum-limits'); ?></strong>
+                                    <p><?php _e('Some hosting providers restrict these changes. Enable "Advanced Configuration" for more powerful writing methods.', 'maxlimits-increase-maximum-limits'); ?>
+                                    </p>
+                                </div>
+                            </div>
+
+                            <p class="description"
+                                style="text-align: center; margin-top: 1.5rem; color: #94a3b8; font-size: 11px;">
+                                <span class="dashicons dashicons-update"
+                                    style="font-size: 12px; width: 12px; height: 12px; margin-right: 4px;"></span>
+                                <?php _e('Real-time values from your server environment.', 'maxlimits-increase-maximum-limits'); ?>
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- DominoPost Promo Widget -->
+                    <!-- DominoPost Promo Widget -->
+                    <div class="maxlimits-card" style="border-top: 4px solid #7c3aed;">
+                        <div class="maxlimits-card-header">
+                            <h2 style="display:flex; align-items:center;">
+                                <span class="dashicons dashicons-edit" style="margin-right:8px; color:#7c3aed;"></span>
+                                <?php _e('FREE AI Writer & Post Editor', 'maxlimits-increase-maximum-limits'); ?>
+                            </h2>
+                        </div>
+                        <div class="maxlimits-card-body">
+                            <p style="margin-top:0; color: #50575e; font-size: 13px;">
+                                <?php _e('Upgrade your content creation workflow. Get advanced tools directly inside your WordPress editor.', 'maxlimits-increase-maximum-limits'); ?>
+                            </p>
+                            <ul style="margin: 12px 0; list-style: none; padding: 0;">
+                                <li style="margin-bottom: 6px; display: flex; align-items: center; font-size: 13px;">
+                                    <span class="dashicons dashicons-welcome-write-blog"
+                                        style="color: #7c3aed; margin-right: 6px; font-size: 16px;"></span>
+                                    <strong><?php _e('Free Unlimited AI Writer (World\'s First)', 'maxlimits-increase-maximum-limits'); ?></strong>
+                                </li>
+                                <li style="margin-bottom: 6px; display: flex; align-items: center; font-size: 13px;">
+                                    <span class="dashicons dashicons-yes"
+                                        style="color: #10b981; margin-right: 6px; font-size: 16px;"></span>
+                                    <?php _e('Automatic Table of Contents', 'maxlimits-increase-maximum-limits'); ?>
+                                </li>
+                                <li style="margin-bottom: 6px; display: flex; align-items: center; font-size: 13px;">
+                                    <span class="dashicons dashicons-yes"
+                                        style="color: #10b981; margin-right: 6px; font-size: 16px;"></span>
+                                    <?php _e('Broken Link Scanner', 'maxlimits-increase-maximum-limits'); ?>
+                                </li>
+                                <li style="margin-bottom: 6px; display: flex; align-items: center; font-size: 13px;">
+                                    <span class="dashicons dashicons-yes"
+                                        style="color: #10b981; margin-right: 6px; font-size: 16px;"></span>
+                                    <?php _e('Estimated Reading Time', 'maxlimits-increase-maximum-limits'); ?>
+                                </li>
+                                <li style="margin-bottom: 6px; display: flex; align-items: center; font-size: 13px;">
+                                    <span class="dashicons dashicons-yes"
+                                        style="color: #10b981; margin-right: 6px; font-size: 16px;"></span>
+                                    <?php _e('Title Case Converter', 'maxlimits-increase-maximum-limits'); ?>
+                                </li>
+                                <li style="margin-bottom: 6px; display: flex; align-items: center; font-size: 13px;">
+                                    <span class="dashicons dashicons-yes"
+                                        style="color: #10b981; margin-right: 6px; font-size: 16px;"></span>
+                                    <?php _e('CTA Buttons, Emoji & Find/Replace', 'maxlimits-increase-maximum-limits'); ?>
+                                </li>
+                                <li style="margin-bottom: 6px; display: flex; align-items: center; font-size: 13px;">
+                                    <span class="dashicons dashicons-plus"
+                                        style="color: #7c3aed; margin-right: 6px; font-size: 16px; font-weight: bold;"></span>
+                                    <strong><?php _e('Many More Premium Features for FREE', 'maxlimits-increase-maximum-limits'); ?></strong>
+                                </li>
+                            </ul>
+                            <a href="<?php echo esc_url(admin_url('plugin-install.php?s=dominopost&tab=search&type=term')); ?>"
+                                target="_blank" class="btn-primary"
+                                style="width:100%; display:block; text-align:center; box-sizing: border-box; background: #7c3aed; border-color: #7c3aed;">
+                                <?php _e('Get DominoPost Free', 'maxlimits-increase-maximum-limits'); ?>
+                            </a>
+                        </div>
+                    </div>
+
+
+                </div>
+
+            </div>
+        </div>
+
+            });
+        </script>
+        <?php
+    }
+
+    private function render_field($key, $meta, $current_limits, $options)
+    {
+        $current_val = $current_limits[$key] ?? '';
+        $is_custom = !in_array($current_val, $options['values']) && !empty($current_val);
+        $select_val = $is_custom ? 'custom' : $current_val;
+        ?>
+        <div class="form-group">
+            <label for="<?php echo esc_attr($key); ?>"><?php echo esc_html($meta['label']); ?></label>
+            <div class="input-wrapper">
+                <select id="<?php echo esc_attr($key); ?>" name="limits[<?php echo esc_attr($key); ?>]"
+                    class="maxlimits-select">
+                    <option value="" <?php selected($select_val, ''); ?>>
+                        <?php _e('Default', 'maxlimits-increase-maximum-limits'); ?>
+                    </option>
+                    <?php foreach ($options['values'] as $val): ?>
+                        <option value="<?php echo esc_attr($val); ?>" <?php selected($select_val, $val); ?>>
+                            <?php echo esc_html($val); ?>
+                        </option>
+                    <?php endforeach; ?>
+                    <option value="custom" <?php selected($select_val, 'custom'); ?> data-pro="true">
+                        <?php _e('Custom (PRO)', 'maxlimits-increase-maximum-limits'); ?>
+                    </option>
+                </select>
+
+                <input type="number" name="limits[<?php echo esc_attr($key); ?>_custom]"
+                    class="maxlimits-input maxlimits-custom-input"
+                    value="<?php echo $is_custom ? esc_attr($current_val) : ''; ?>" placeholder="Value" style="display: none;">
+
+                <span class="unit-label"><?php echo esc_html($options['label']); ?></span>
+            </div>
+            <p class="description"><?php echo esc_html($meta['desc']); ?></p>
+        </div>
+        <?php
+    }
+
+    /**
+     * AJAX Handler: Save Settings
+     */
+    public function ajax_save_settings()
+    {
+        check_ajax_referer('maxlimits-nonce', 'security');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized']);
+        }
+
+        // 0. Cleanup any conflicting rules from Recovery/Manual modes
+        $this->cleanup_external_rules();
+
+        // 1. Sanitize & Save Limits
+        $raw_limits = $_POST['limits'] ?? [];
+        $clean_limits = [];
+        $limit_defs = $this->core->get_limit_options();
+
+        foreach ($limit_defs as $key => $def) {
+            if (isset($raw_limits[$key])) {
+                if ($raw_limits[$key] === 'custom') {
+                    $custom_val = $raw_limits[$key . '_custom'] ?? '';
+                    if (!empty($custom_val)) {
+                        $clean_limits[$key] = absint($custom_val);
+                    }
+                } elseif ($raw_limits[$key] !== '') {
+                    $clean_limits[$key] = absint($raw_limits[$key]);
+                }
+            }
+        }
+
+        update_option($this->core->limit_option_name, $clean_limits);
+
+        // 2. Sanitize & Save Advanced
+        $write_htaccess = isset($_POST['write_to_htaccess']) ? 1 : 0;
+        $write_wpconfig = isset($_POST['write_to_wpconfig']) ? 1 : 0;
+        $advanced = [
+            'write_to_htaccess' => $write_htaccess,
+            'write_to_wpconfig' => $write_wpconfig
+        ];
+        update_option($this->core->advanced_option_name, $advanced);
+
+        $warnings = [];
+
+        // 3. Handle .htaccess writing
+        if ($write_htaccess) {
+            if (!$this->update_htaccess($clean_limits)) {
+                $warnings[] = __('Could not write to .htaccess. Please check file permissions.', 'maxlimits-increase-maximum-limits');
+            }
+        } else {
+            $this->remove_htaccess_rules();
+        }
+
+        // 4. Handle wp-config.php injection
+        if ($write_wpconfig) {
+            if (!$this->update_wpconfig($clean_limits)) {
+                $warnings[] = __('Could not write to wp-config.php. Please check file permissions.', 'maxlimits-increase-maximum-limits');
+            }
+        } else {
+            $this->remove_wpconfig_rules();
+        }
+
+        // Flush general cache
+        wp_cache_flush();
+
+        $message = __('Settings saved successfully.', 'maxlimits-increase-maximum-limits');
+        if (!empty($warnings)) {
+            wp_send_json_success([
+                'message' => $message,
+                'warnings' => $warnings
+            ]);
+        } else {
+            wp_send_json_success(['message' => $message]);
+        }
+    }
+
+    /**
+     * AJAX Handler: Get Server Limits HTML
+     */
+    public function ajax_get_server_limits()
+    {
+        check_ajax_referer('maxlimits-nonce', 'security');
+        wp_send_json_success(['html' => $this->get_server_limits_html(false)]);
+    }
+
+    private function get_server_limits_html($show_footer = true)
+    {
+        $saved_limits = get_option($this->core->limit_option_name, []);
+        
+        $limits = [
+            __('Upload Max Size', 'maxlimits-increase-maximum-limits') => [
+                'key' => 'upload_max_filesize', 
+                'target' => $saved_limits['upload_max_filesize'] ?? 0,
+                'min' => 64, 
+                'icon' => 'dashicons-upload'
+            ],
+            __('Post Max Size', 'maxlimits-increase-maximum-limits') => [
+                'key' => 'post_max_size', 
+                'target' => $saved_limits['post_max_size'] ?? 0,
+                'min' => 64, 
+                'icon' => 'dashicons-cloud-upload'
+            ],
+            __('Memory Limit', 'maxlimits-increase-maximum-limits') => [
+                'key' => 'memory_limit', 
+                'target' => $saved_limits['memory_limit'] ?? 0,
+                'min' => 256, 
+                'icon' => 'dashicons-database'
+            ],
+            __('Max Execution', 'maxlimits-increase-maximum-limits') => [
+                'key' => 'max_execution_time', 
+                'target' => $saved_limits['max_execution_time'] ?? 0,
+                'min' => 300, 
+                'icon' => 'dashicons-clock'
+            ],
+            __('Max Input Time', 'maxlimits-increase-maximum-limits') => [
+                'key' => 'max_input_time', 
+                'target' => $saved_limits['max_input_time'] ?? 0,
+                'min' => 300, 
+                'icon' => 'dashicons-hourglass'
+            ],
+            __('Max Input Vars', 'maxlimits-increase-maximum-limits') => [
+                'key' => 'max_input_vars', 
+                'target' => $saved_limits['max_input_vars'] ?? 0,
+                'min' => 3000, 
+                'icon' => 'dashicons-list-view'
+            ],
+        ];
+
+        $html = '<div class="maxlimits-dashboard-grid">';
+        $byte_keys = ['upload_max_filesize', 'post_max_size', 'memory_limit'];
+
+        foreach ($limits as $label => $data) {
+            $raw_val = ini_get($data['key']);
+            $is_byte_value = in_array($data['key'], $byte_keys);
+
+            if ($is_byte_value) {
+                $bytes = wp_convert_hr_to_bytes($raw_val);
+                if ($bytes === -1) {
+                    $val_compare = PHP_INT_MAX;
+                    $display_val = __('Unlimited', 'maxlimits-increase-maximum-limits');
+                } else {
+                    $val_compare = $bytes / 1048576;
+                    $display_val = round($val_compare) . 'M';
+                }
+            } else {
+                $val_compare = intval($raw_val);
+                if (($data['key'] === 'max_execution_time' || $data['key'] === 'max_input_time') && ($val_compare === 0 || $val_compare === -1)) {
+                    $val_compare = PHP_INT_MAX;
+                    $display_val = __('Unlimited', 'maxlimits-increase-maximum-limits');
+                } else {
+                    $display_val = $raw_val;
+                }
+            }
+
+            // Logic:
+            // 1. Success (Green): Actual >= Target (Target > 0)
+            // 2. Default (Neutral): Target == 0, but Actual >= Min
+            // 3. Mismatch (Yellow): Actual < Target
+            // 4. Critical (Red): Actual < Min
+
+            if ($data['target'] > 0 && $val_compare >= $data['target']) {
+                $class = 'ok';
+            } elseif ($data['target'] > 0 && $val_compare < $data['target']) {
+                $class = 'warning';
+            } elseif ($val_compare >= $data['min']) {
+                $class = 'ok';
+            } else {
+                $class = 'warning'; // Using warning as red is too aggressive for defaults
+            }
+            
+            // If it's truly dangerously low, use a specific red indicator (logic can be expanded here)
+            if ($val_compare < ($data['min'] / 2)) {
+                $class = 'warning critical'; // we'll use CSS to handle critical color
+            }
+
+            $html .= sprintf(
+                '<div class="maxlimits-grid-item %s">
+                    <span class="grid-icon dashicons %s"></span>
+                    <div class="grid-content">
+                        <span class="grid-label">%s</span>
+                        <span class="grid-value %s">%s</span>
+                    </div>
+                </div>',
+                esc_attr($class),
+                esc_attr($data['icon']),
+                esc_html($label),
+                esc_attr($class),
+                esc_html($display_val)
+            );
+        }
+        $html .= '</div>';
+        if ($show_footer) {
+            $html .= sprintf(
+                '<div class="maxlimits-dashboard-footer" style="padding: 12px; border-top: 1px solid #f0f0f1; text-align: center;">
+                    <a href="%s" class="button button-link" style="font-size: 13px; font-weight: 500; text-decoration: none;">%s →</a>
+                </div>',
+                esc_url(admin_url('admin.php?page=' . $this->menu_slug)),
+                __('Increase Limits', 'maxlimits-increase-maximum-limits')
+            );
+        }
+        return $html;
+    }
+
+    private function update_htaccess($limits)
+    {
+        $htaccess_file = get_home_path() . '.htaccess';
+        if (!file_exists($htaccess_file)) {
+            @touch($htaccess_file);
+        }
+        
+        if (!is_writable($htaccess_file)) {
+            return false;
+        }
+
+        if (!function_exists('insert_with_markers')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+
+        $snippets = $this->core->get_ini_code_snippets($limits);
+        // We only need the inner content, insert_with_markers adds the BEGIN/END tags
+        // But my get_ini_code_snippets adds them too. Let me strip them or just use a raw generator.
+        // Actually, insert_with_markers takes an array or string. It wraps it with the markers. 
+        // My get_ini_code_snippets returns the full block including markers.
+        // So I should clean it up or rewrite the logic slightly.
+
+        // Let's just regenerate the lines here for safety/clarity without markers
+        $lines = [];
+        $map = [
+            'upload_max_filesize' => 'php_value upload_max_filesize',
+            'post_max_size' => 'php_value post_max_size',
+            'memory_limit' => 'php_value memory_limit',
+            'max_execution_time' => 'php_value max_execution_time',
+            'max_input_time' => 'php_value max_input_time',
+            'max_input_vars' => 'php_value max_input_vars',
+        ];
+
+        foreach ($map as $key => $directive) {
+            if (!empty($limits[$key])) {
+                $suffix = in_array($key, ['upload_max_filesize', 'post_max_size', 'memory_limit']) ? 'M' : '';
+                $lines[] = $directive . ' ' . $limits[$key] . $suffix;
+            }
+        }
+
+        return insert_with_markers($htaccess_file, 'MaxLimits', $lines);
+    }
+
+    private function cleanup_external_rules()
+    {
+        $htaccess = get_home_path() . '.htaccess';
+        $user_ini = ABSPATH . '.user.ini';
+
+        $files = [$htaccess, $user_ini];
+        foreach ($files as $file) {
+            if (!file_exists($file) || !is_writable($file)) continue;
+            
+            $content = file_get_contents($file);
+            $modified = false;
+
+            // 1. Remove markers with END tags (# BEGIN MaxLimits Emergency Recovery ... # END ...)
+            $markers = ['MaxLimits Emergency Recovery', 'MaxLimits Manual Recovery'];
+            foreach ($markers as $marker) {
+                $count = 0;
+                $pattern = "/\n*# BEGIN {$marker}.*?# END {$marker}\n*/s";
+                $content = preg_replace($pattern, "\n", $content, -1, $count);
+                if ($count > 0) $modified = true;
+            }
+
+            // 2. Remove loose blocks from .user.ini or failed .htaccess writes
+            // Looks for the comment and then any lines that look like "key = value" or "php_value key value"
+            foreach ($markers as $marker) {
+                $count = 0;
+                // Matches the comment (either # or ;) and subsequent lines of limit-related directives
+                $pattern = "/(?:\n|^)[#;]\s*{$marker}\s*\n(?:(?:php_value|[\w_]+)\s+[^\n]+\n?)+/i";
+                $content = preg_replace($pattern, "\n", $content, -1, $count);
+                if ($count > 0) $modified = true;
+            }
+
+            if ($modified) {
+                file_put_contents($file, trim($content) . "\n");
+            }
+        }
+    }
+
+    private function remove_htaccess_rules()
+    {
+        $htaccess_file = get_home_path() . '.htaccess';
+        if (!is_writable($htaccess_file))
+            return;
+
+        if (!function_exists('insert_with_markers')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+
+        insert_with_markers($htaccess_file, 'MaxLimits', []);
+    }
+
+    private function update_wpconfig($limits)
+    {
+        $config_file = ABSPATH . 'wp-config.php';
+        if (!is_writable($config_file)) {
+            return false;
+        }
+
+        $content = file_get_contents($config_file);
+        $this->remove_wpconfig_rules(); // Clean up existing first
+        $content = file_get_contents($config_file);
+        $new_lines = "\n/* MaxLimits START */\n";
+        
+        // Memory Limits (Standard Constants)
+        $mem_limit = !empty($limits['memory_limit']) ? $limits['memory_limit'] . 'M' : '';
+        if ($mem_limit) {
+            $new_lines .= "define( 'WP_MEMORY_LIMIT', '{$mem_limit}' );\n";
+            $new_lines .= "define( 'WP_MAX_MEMORY_LIMIT', '{$mem_limit}' );\n";
+        }
+
+        // Other Limits (via ini_set in wp-config)
+        $map = [
+            'upload_max_filesize' => 'upload_max_filesize',
+            'post_max_size'       => 'post_max_size',
+            'memory_limit'        => 'memory_limit',
+            'max_execution_time'  => 'max_execution_time',
+            'max_input_time'      => 'max_input_time',
+            'max_input_vars'      => 'max_input_vars',
+        ];
+
+        foreach ($map as $key => $directive) {
+            if (!empty($limits[$key])) {
+                $suffix = in_array($key, ['upload_max_filesize', 'post_max_size', 'memory_limit']) ? 'M' : '';
+                $new_lines .= "@ini_set( '{$directive}', '{$limits[$key]}{$suffix}' );\n";
+            }
+        }
+
+        $new_lines .= "/* MaxLimits END */\n";
+
+        // Insert before the "Stop editing" line
+        $stop_editing = "/* That's all, stop editing! Happy publishing. */";
+        if (strpos($content, $stop_editing) !== false) {
+            $content = str_replace($stop_editing, $new_lines . $stop_editing, $content);
+        } else {
+            // Fallback: search for something similar or just append before the end
+            $content .= $new_lines;
+        }
+
+        return (bool) file_put_contents($config_file, $content);
+    }
+
+    private function remove_wpconfig_rules()
+    {
+        $config_file = ABSPATH . 'wp-config.php';
+        if (!is_writable($config_file))
+            return;
+
+        $content = file_get_contents($config_file);
+        $pattern = "/\n\/\* MaxLimits START \*\/.*?\/\* MaxLimits END \*\/\n/s";
+        $content = preg_replace($pattern, "", $content);
+
+        file_put_contents($config_file, $content);
+    }
+
+    public function register_dashboard_widget()
+    {
+        if (current_user_can('manage_options')) {
+            wp_add_dashboard_widget(
+                'maxlimits_dashboard',
+                __('MaxLimits Server Status', 'maxlimits-increase-maximum-limits'),
+                function () {
+                    echo '<div class="maxlimits-wrap" style="padding:0; min-height:auto;">' . $this->get_server_limits_html() . '</div>';
+                    ?>
+                <style>
+                    #maxlimits_dashboard .inside {
+                        padding: 0;
+                        margin: 0;
+                    }
+
+                    .maxlimits-dashboard-grid {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        gap: 1px;
+                        background: #e2e8f0;
+                        border-bottom: 1px solid #e2e8f0;
+                    }
+
+                    .maxlimits-grid-item {
+                        background: #fff;
+                        padding: 16px 12px;
+                        display: flex;
+                        align-items: center;
+                        transition: all 0.2s ease;
+                    }
+
+                    .maxlimits-grid-item:hover {
+                        background: #f8fafc;
+                        z-index: 1;
+                        box-shadow: inset 0 0 0 1px #cbd5e1;
+                    }
+
+                    .maxlimits-grid-item .grid-icon {
+                        font-size: 18px;
+                        width: 18px;
+                        height: 18px;
+                        margin-right: 14px;
+                        color: #64748b;
+                        opacity: 0.7;
+                    }
+
+                    .maxlimits-grid-item .grid-content {
+                        display: flex;
+                        flex-direction: column;
+                        flex: 1;
+                        overflow: hidden;
+                    }
+
+                    .maxlimits-grid-item .grid-label {
+                        font-size: 10px;
+                        text-transform: uppercase;
+                        letter-spacing: 0.05em;
+                        color: #64748b;
+                        font-weight: 700;
+                        line-height: 1.4;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    }
+
+                    .maxlimits-grid-item .grid-value {
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: #0f172a;
+                        line-height: 1.2;
+                        margin-top: 1px;
+                    }
+
+                    .maxlimits-grid-item.warning .grid-value {
+                        color: #d97706;
+                    }
+
+                    .maxlimits-grid-item.ok .grid-value {
+                        color: #059669;
+                    }
+
+                    .maxlimits-dashboard-footer .button-link {
+                        color: #7c3aed !important;
+                        text-decoration: none !important;
+                        font-weight: 600 !important;
+                        transition: color 0.1s ease-in-out;
+                    }
+
+                    .maxlimits-dashboard-footer .button-link:hover {
+                        color: #4f46e5 !important;
+                    }
+
+                    @media (max-width: 480px) {
+                        .maxlimits-dashboard-grid {
+                            grid-template-columns: 1fr;
+                        }
+                    }
+                </style>
+                <?php
+                }
+            );
+        }
+    }
+
+    /**
+     * Render the tracking consent notice
+     */
+    public function render_tracking_notice()
+    {
+        // Only show if pending
+        if (!get_option('maxlimits_tracking_pending')) {
+            return;
+        }
+
+        // Output the notice
+        ?>
+        <div class="notice notice-info is-dismissible maxlimits-tracking-notice"
+            style="border-left-color: #0073aa; padding:15px 20px;">
+            <p style="margin: 5px 0 10px; font-weight: 600; font-size:14px; color: #1d2327;">
+                <?php _e('Enable Security Alerts & Feature Improvements', 'maxlimits-increase-maximum-limits'); ?>
+            </p>
+            <p style="margin: 0 0 15px; color: #3c434a; max-width: 800px; line-height: 1.5;">
+                <?php _e('Help us keep MaxLimits secure and compatible with your site. By allowing us to collect basic non-sensitive environment data (like WP version and language), we can ensure better stability and faster security updates for you.', 'maxlimits-increase-maximum-limits'); ?>
+            </p>
+            <p style="margin:0;">
+                <button class="button button-primary maxlimits-track-allow"
+                    style="background-color: #0073aa; border-color: #0073aa;"><?php _e('Allow & Continue', 'maxlimits-increase-maximum-limits'); ?></button>
+            </p>
+
+            <script>         jQuery(document).ready(function ($) {
+                    var notice = $('.maxlimits-tracking-notice');
+                    // Handle "Allow"             notice.on('click', '.maxlimits-track-allow', function (e) {                 e.preventDefault();                 var btn = $(this);                 btn.prop('disabled', true).text('<?php echo esc_js(__('Enabling...', 'maxlimits-increase-maximum-limits')); ?>');
+                    $.post(ajaxurl, { action: 'maxlimits_tracking_consent', consent: 1, nonce: '<?php echo wp_create_nonce('maxlimits-tracking-nonce'); ?>' }, function () { notice.slideUp(); });
+                });
+                // Handle "Dismiss" (X button)             notice.on('click', '.notice-dismiss', function () {                 $.post(ajaxurl, {                     action: 'maxlimits_tracking_consent',                     consent: 0,                     nonce: '<?php echo wp_create_nonce('maxlimits-tracking-nonce'); ?>'                 });             });         });
+            </script>
+        </div>
+        <?php
+    }
+
+    /**
+     * AJAX Handler: Tracking Consent
+     */
+    public function ajax_handle_tracking_consent()
+    {
+        check_ajax_referer('maxlimits-tracking-nonce', 'nonce');
+
+        $consent = !empty($_POST['consent']) ? 1 : 0;
+
+        delete_option('maxlimits_tracking_pending');
+        update_option('maxlimits_allow_tracking', $consent);
+
+        if ($consent) {
+            $this->send_tracking_data('activate');
+        }
+
+        wp_send_json_success();
+    }
+
+    public function send_tracking_data($status = 'active')
+    {
+        $insights = new MaxLimits_Insights();
+        $insights->send_event($status);
+    }
+
+    /**
+     * Renders a persuasive upsell page for the Emergency Recovery feature.
+     */
+    public function render_recovery_upsell_page()
+    {
+    ?>
+        <div class="wrap maxlimits-wrap">
+            <?php $this->render_common_header(); ?>
+
+            <div class="maxlimits-container" style="max-width: 800px; margin: 0 auto; display: block;">
+                <div class="maxlimits-card" style="border-top: 4px solid #7c3aed; padding: 40px; text-align: center;">
+                    <div style="background: #f5f3ff; width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 24px;">
+                        <span class="dashicons dashicons-shield-alt" style="font-size: 40px; width: 40px; height: 40px; color: #7c3aed;"></span>
+                    </div>
+
+                    <h1 style="font-size: 32px; font-weight: 800; color: #1e293b; margin-bottom: 16px;">
+                        <?php _e('Emergency Recovery is a PRO Feature', 'maxlimits-increase-maximum-limits'); ?>
+                    </h1>
+
+                    <p style="font-size: 18px; color: #64748b; line-height: 1.6; margin-bottom: 32px; max-width: 600px; margin-left: auto; margin-right: auto;">
+                        <?php _e('What happens if your site crashes due to low memory or PHP timeouts? Without access to wp-admin, you cannot fix it. Emergency Recovery gives you a secret "Rescue Link" to fix your site in seconds.', 'maxlimits-increase-maximum-limits'); ?>
+                    </p>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; text-align: left; margin-bottom: 40px; background: #fafafa; padding: 30px; border-radius: 12px; border: 1px solid #eee;">
+                        <div>
+                            <h3 style="margin-top:0; display:flex; align-items:center; gap:8px;">
+                                <span class="dashicons dashicons-yes" style="color:#10b981;"></span>
+                                <?php _e('Works Outside WP-Admin', 'maxlimits-increase-maximum-limits'); ?>
+                            </h3>
+                            <p style="font-size:13px; color:#64748b;"><?php _e('Access your site recovery panel even if the entire site is down with a Critical Error.', 'maxlimits-increase-maximum-limits'); ?></p>
+                        </div>
+                        <div>
+                            <h3 style="margin-top:0; display:flex; align-items:center; gap:8px;">
+                                <span class="dashicons dashicons-yes" style="color:#10b981;"></span>
+                                <?php _e('1-Click Auto Fix', 'maxlimits-increase-maximum-limits'); ?>
+                            </h3>
+                            <p style="font-size:13px; color:#64748b;"><?php _e('Instantly boost limits to "Maximum Power" to bypass memory and time crashing issues.', 'maxlimits-increase-maximum-limits'); ?></p>
+                        </div>
+                        <div>
+                            <h3 style="margin-top:0; display:flex; align-items:center; gap:8px;">
+                                <span class="dashicons dashicons-yes" style="color:#10b981;"></span>
+                                <?php _e('PIN Protected', 'maxlimits-increase-maximum-limits'); ?>
+                            </h3>
+                            <p style="font-size:13px; color:#64748b;"><?php _e('Your recovery link is secured with a private PIN that only you know.', 'maxlimits-increase-maximum-limits'); ?></p>
+                        </div>
+                        <div>
+                            <h3 style="margin-top:0; display:flex; align-items:center; gap:8px;">
+                                <span class="dashicons dashicons-yes" style="color:#10b981;"></span>
+                                <?php _e('Zero Configuration', 'maxlimits-increase-maximum-limits'); ?>
+                            </h3>
+                            <p style="font-size:13px; color:#64748b;"><?php _e('No manual coding needed. Just generate your link and keep it safe.', 'maxlimits-increase-maximum-limits'); ?></p>
+                        </div>
+                    </div>
+
+                    <a href="https://dominopress.com/plugin/maxlimits" target="_blank" class="btn-primary" style="padding: 18px 40px; font-size: 18px; border-radius: 14px; text-decoration: none;">
+                        <?php _e('Get Emergency Recovery with MaxLimits PRO', 'maxlimits-increase-maximum-limits'); ?>
+                    </a>
+
+                    <p style="margin-top: 24px; font-size: 13px; color: #94a3b8;">
+                        <?php _e('Join 1,000+ users who trust MaxLimits to keep their sites running smoothly.', 'maxlimits-increase-maximum-limits'); ?>
+                    </p>
+                </div>
+            </div>
+        </div>
+    <?php
+    }
+
+    /**
+     * Render the Emergency Recovery page.
+     */
+    public function render_recovery_page()
+    {
+        ?>
+        <div class="wrap maxlimits-wrap">
+            <?php $this->render_common_header(); ?>
+
+            <div class="maxlimits-recovery-container" style="max-width: 900px; margin: 0 auto; padding-top: 20px;">
+                
+                <!-- Page Title Section -->
+                <div style="margin-bottom: 3rem; text-align: left;">
+                    <h2 style="font-size: 32px; font-weight: 900; color: #0f172a; margin: 0 0 12px; letter-spacing: -0.03em;"><?php _e('Emergency Recovery Mode', 'maxlimits-increase-maximum-limits'); ?></h2>
+                    <p style="font-size: 17px; color: #64748b; margin: 0; line-height: 1.6; max-width: 700px;">
+                        <?php _e('Create a secure, standalone gateway that bypasses WordPress completely. If your site ever crashes or locks you out, use this link to fix it in one click.', 'maxlimits-increase-maximum-limits'); ?>
+                    </p>
+                </div>
+
+                <!-- Main Management Card -->
+                <div class="maxlimits-card" style="border: none; box-shadow: 0 10px 30px rgba(0,0,0,0.08); border-radius: 20px; overflow: hidden; background: #fff;">
+                    <div style="background: linear-gradient(90deg, #f59e0b 0%, #fbbf24 100%); height: 6px;"></div>
+                    
+                    <div class="maxlimits-card-header" style="padding: 35px 40px 10px; border: none;">
+                        <h2 style="font-size: 22px; font-weight: 800; color: #1e293b; display: flex; align-items: center; gap: 12px;">
+                            <span class="dashicons dashicons-shield-alt" style="color: #f59e0b; font-size: 24px; width: 24px; height: 24px;"></span>
+                            <?php _e('Recovery Link Management', 'maxlimits-increase-maximum-limits'); ?>
+                        </h2>
+                    </div>
+
+                    <div class="maxlimits-card-body" style="padding: 30px 40px 45px;">
+                        <?php $recovery_file = get_option('maxlimits_recovery_file'); ?>
+                        <?php if ($recovery_file && file_exists(ABSPATH . $recovery_file)): ?>
+                            <!-- ACTIVE STATE -->
+                            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 30px;">
+                                <div style="display: flex; align-items: flex-start; gap: 18px; margin-bottom: 30px;">
+                                    <div style="background: #10b981; color: #fff; width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 10px rgba(16, 185, 129, 0.2);">
+                                        <span class="dashicons dashicons-yes-alt" style="font-size: 24px; width: 24px; height: 24px;"></span>
+                                    </div>
+                                    <div>
+                                        <h3 style="margin: 0 0 6px; font-size: 19px; color: #064e3b; font-weight: 800;"><?php _e('Your Link is Ready & Active', 'maxlimits-increase-maximum-limits'); ?></h3>
+                                        <p style="margin: 0; color: #854d0e; font-size: 14px; font-weight: 600; background: #fef3c7; padding: 4px 12px; border-radius: 6px; display: inline-block;">
+                                            <?php _e('⚠️ Bookmark this link now. It works even if your site is dead.', 'maxlimits-increase-maximum-limits'); ?>
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div style="display: flex; gap: 12px; align-items: stretch; margin-bottom: 35px;">
+                                    <input type="text" id="maxlimits-recovery-url" readonly value="<?php echo esc_url(site_url('/' . $recovery_file)); ?>" onclick="this.select()" 
+                                        style="flex: 1; font-family: 'Fira Code', monospace; font-size: 14px; background: #fff; height: 56px; padding: 0 20px; border-radius: 12px; border: 2px solid #e2e8f0; color: #475569; transition: all 0.2s; outline: none; margin: 0;">
+                                    <button type="button" class="btn-primary" id="maxlimits-copy-link"
+                                        style="height: 56px; padding: 0 32px; border-radius: 12px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; white-space: nowrap;">
+                                        <?php _e('Copy Link', 'maxlimits-increase-maximum-limits'); ?>
+                                    </button>
+                                </div>
+
+                                <!-- Security Instructions -->
+                                <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 15px 20px; margin-bottom: 30px; display: flex; align-items: center; gap: 15px;">
+                                    <span class="dashicons dashicons-clipboard" style="color: #2563eb; font-size: 20px; width: 20px; height: 20px;"></span>
+                                    <p style="margin: 0; font-size: 13.5px; color: #1e3a8a; line-height: 1.5;">
+                                        <strong><?php _e('Action Required:', 'maxlimits-increase-maximum-limits'); ?></strong> 
+                                        <?php _e('Save this URL and your PIN in a password manager or a private note. If your site crashes, you won\'t be able to access this page to find them.', 'maxlimits-increase-maximum-limits'); ?>
+                                    </p>
+                                </div>
+                                
+                                <div style="background: #fff; border: 1px solid #fee2e2; border-radius: 12px; padding: 20px; display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <h4 style="margin: 0; font-size: 14px; color: #b91c1c;"><?php _e('Reset Recovery Options', 'maxlimits-increase-maximum-limits'); ?></h4>
+                                        <p style="margin: 4px 0 0; font-size: 12px; color: #94a3b8;"><?php _e('Need to change your PIN or reset the file?', 'maxlimits-increase-maximum-limits'); ?></p>
+                                    </div>
+                                    <button type="button" class="ml-btn-danger" id="maxlimits-delete-recovery" 
+                                        data-nonce="<?php echo wp_create_nonce('maxlimits-nonce'); ?>"
+                                        style="height: 42px; padding: 0 24px; font-size: 13px;">
+                                        <?php _e('Delete Link', 'maxlimits-increase-maximum-limits'); ?>
+                                    </button>
+                                </div>
+                            </div>
+                        <?php else: ?>
+                            <!-- INACTIVE STATE -->
+                            <div style="text-align: center; max-width: 550px; margin: 0 auto; padding: 20px 0;">
+                                <div style="background: #fff8f1; width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 25px; box-shadow: 0 10px 20px rgba(245, 158, 11, 0.1);">
+                                    <span class="dashicons dashicons-lock" style="font-size: 32px; width: 32px; height: 32px; color: #f59e0b;"></span>
+                                </div>
+                                <h3 style="margin: 0 0 12px; font-size: 22px; font-weight: 800; color: #1e293b;"><?php _e('Setup Your Recovery Lifeline', 'maxlimits-increase-maximum-limits'); ?></h3>
+                                <p style="font-size: 15px; color: #64748b; line-height: 1.6; margin-bottom: 30px;">
+                                    <?php _e('Generate a custom PHP script and secure it with a PIN. This link will be yours to keep for emergencies when the dashboard is unreachable.', 'maxlimits-increase-maximum-limits'); ?>
+                                </p>
+                                
+                                <div style="display: flex; gap: 12px; align-items: stretch; max-width: 480px; margin: 0 auto;">
+                                    <input type="password" id="maxlimits-recovery-pin" placeholder="<?php esc_attr_e('Set a 6-digit PIN', 'maxlimits-increase-maximum-limits'); ?>" 
+                                        style="flex: 1; height: 56px; border-radius: 12px; font-size: 16px; border: 2px solid #e2e8f0; padding: 0 20px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); background: #fff; outline: none; margin: 0;">
+                                    <button type="button" class="btn-primary" id="maxlimits-generate-recovery" 
+                                        data-nonce="<?php echo wp_create_nonce('maxlimits-nonce'); ?>"
+                                        style="height: 56px; padding: 0 32px; border-radius: 12px; font-weight: 800; background: #f59e0b; border: none; color: #fff; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2); cursor: pointer; white-space: nowrap;">
+                                        <?php _e('Create Script', 'maxlimits-increase-maximum-limits'); ?>
+                                    </button>
+                                </div>
+
+                                <p style="margin-top: 20px; font-size: 13px; color: #94a3b8; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                                    <span class="dashicons dashicons-shield" style="font-size: 16px; width: 16px; height: 16px;"></span>
+                                    <?php _e('Highly Secure: We use industry-standard password hashing (bcrypt).', 'maxlimits-increase-maximum-limits'); ?>
+                                </p>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <!-- Secondary Info Grid -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem; margin-top: 3rem; margin-bottom: 5rem;">
+                    <!-- Lifesaver Card -->
+                    <div class="maxlimits-card" style="border: none; border-radius: 16px; height: 100%;">
+                        <div class="maxlimits-card-header" style="border: none; padding: 25px 30px 0;">
+                            <h3 style="font-size: 18px; font-weight: 800; color: #1e293b; display: flex; align-items: center; gap: 10px;">
+                                <span class="dashicons dashicons-heart" style="color: #ef4444;"></span>
+                                <?php _e('Why this is a Lifesaver', 'maxlimits-increase-maximum-limits'); ?>
+                            </h3>
+                        </div>
+                        <div class="maxlimits-card-body" style="padding: 20px 30px 30px; font-size: 14px; line-height: 1.7; color: #64748b;">
+                            <p style="margin-top: 0;"><?php _e('Imagine your site crashes during a busy sale or right after a theme update. Your WordPress Admin is gone, showing only a white screen. You are locked out.', 'maxlimits-increase-maximum-limits'); ?></p>
+                            <p><?php _e('This script is your **backdoor**. Because it runs independently of WordPress, it works even when your site is "dead". It gives you the power to:', 'maxlimits-increase-maximum-limits'); ?></p>
+                            <ul style="padding-left: 20px; list-style: disc;">
+                                <li style="margin-bottom: 10px;"><?php _e('Fix "Memory Exhausted" errors in under 5 seconds.', 'maxlimits-increase-maximum-limits'); ?></li>
+                                <li style="margin-bottom: 10px;"><?php _e('Bypass server timeouts that prevent you from logging in.', 'maxlimits-increase-maximum-limits'); ?></li>
+                                <li><?php _e('Restore access without needing FTP commands or hosting tech support.', 'maxlimits-increase-maximum-limits'); ?></li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Common Errors Card -->
+                    <div class="maxlimits-card" style="border: none; border-radius: 16px; height: 100%;">
+                        <div class="maxlimits-card-header" style="border: none; padding: 25px 30px 0;">
+                            <h3 style="font-size: 18px; font-weight: 800; color: #1e293b; display: flex; align-items: center; gap: 10px;">
+                                <span class="dashicons dashicons-warning" style="color: #ef4444;"></span>
+                                <?php _e('Critical Errors Fixed', 'maxlimits-increase-maximum-limits'); ?>
+                            </h3>
+                        </div>
+                        <div class="maxlimits-card-body" style="padding: 20px 30px 30px;">
+                            <div style="display: flex; flex-direction: column; gap: 12px;">
+                                <div style="padding: 12px 16px; background: #fff1f2; border-radius: 10px; border-left: 4px solid #f43f5e; font-family: monospace; font-size: 12px; color: #9f1239; font-weight: 700;">
+                                    <?php _e('Memory size exhausted', 'maxlimits-increase-maximum-limits'); ?>
+                                </div>
+                                <div style="padding: 12px 16px; background: #fff1f2; border-radius: 10px; border-left: 4px solid #f43f5e; font-family: monospace; font-size: 12px; color: #9f1239; font-weight: 700;">
+                                    <?php _e('Max execution time exceeded', 'maxlimits-increase-maximum-limits'); ?>
+                                </div>
+                                <div style="padding: 12px 16px; background: #fff1f2; border-radius: 10px; border-left: 4px solid #f43f5e; font-family: monospace; font-size: 12px; color: #9f1239; font-weight: 700;">
+                                    <?php _e('Gateway Timeout (504 Errors)', 'maxlimits-increase-maximum-limits'); ?>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Failsafe Scripts -->
+        <script>
+            jQuery(document).ready(function($) {
+                // Delete Link
+                $(document).on('click', '#maxlimits-delete-recovery', function(e) {
+                    e.preventDefault();
+                    var btn = $(this);
+                    if (confirm('<?php echo esc_js(__('Are you sure you want to delete your emergency recovery link?', 'maxlimits-increase-maximum-limits')); ?>')) {
+                        var originalText = btn.text();
+                        btn.prop('disabled', true).text('<?php echo esc_js(__('Deleting...', 'maxlimits-increase-maximum-limits')); ?>');
+                        $.post(ajaxurl, {
+                            action: 'maxlimits_delete_recovery',
+                            security: btn.data('nonce')
+                        }, function(response) {
+                            if (response.success) { location.reload(); }
+                            else { alert(response.data.message || 'Error deleting link.'); btn.prop('disabled', false).text(originalText); }
+                        });
+                    }
+                });
+
+                // Copy Link
+                $(document).on('click', '#maxlimits-copy-link', function(e) {
+                    var btn = $(this);
+                    var urlInput = $('#maxlimits-recovery-url');
+                    
+                    urlInput.select();
+                    document.execCommand('copy');
+                    
+                    var originalText = btn.html();
+                    btn.html('<span class="dashicons dashicons-yes"></span> Copied!').css({
+                        'background': '#10b981',
+                        'transition': 'all 0.2s'
+                    });
+                    
+                    setTimeout(function() {
+                        btn.html(originalText).css('background', '');
+                    }, 2000);
+                });
+
+                // Generate Link
+                $('#maxlimits-generate-recovery').on('click', function(e) {
+                    e.preventDefault();
+                    var btn = $(this);
+                    var pin = $('#maxlimits-recovery-pin').val();
+                    if (pin.length < 4) { alert('<?php echo esc_js(__('PIN must be at least 4 characters.', 'maxlimits-increase-maximum-limits')); ?>'); return; }
+                    var originalText = btn.text();
+                    btn.prop('disabled', true).text('<?php echo esc_js(__('Generating...', 'maxlimits-increase-maximum-limits')); ?>');
+                    $.post(ajaxurl, {
+                        action: 'maxlimits_generate_recovery',
+                        security: btn.data('nonce'),
+                        pin: pin
+                    }, function(response) {
+                        if (response.success) { location.reload(); }
+                        else { alert(response.data.message || 'Error creating script.'); btn.prop('disabled', false).text(originalText); }
+                    });
+                });
+            });
+        </script>
+        <?php
+    }
+
+
+    /**
+     * Render the Other Plugins page.
+     */
+    public function render_other_plugins_page()
+    {
+        $nonce   = wp_create_nonce('wp_rest');
+        $api_url = esc_url(rest_url('maxlimits/v1/other-plugins'));
+        ?>
+        <div class="wrap" id="maxlimits-other-plugins-root" style="margin-left: -20px; padding: 20px;">
+            <?php $this->render_common_header(); ?>
+            <div style="max-width: 1200px; margin: 0 auto; padding: 40px 20px; font-family: 'Inter', system-ui, sans-serif;">
+                <div style="margin-bottom: 60px; text-align: center;">
+                    <h1 style="margin: 0 0 16px 0; font-size: 40px; font-weight: 800; color: #1e293b; letter-spacing: -0.03em; line-height: 1.1;">More from DominoPress</h1>
+                    <p style="margin: 0; font-size: 18px; color: #64748b; max-width: 650px; margin-inline: auto; line-height: 1.6; font-weight: 500;">
+                        Supercharge your WooCommerce store with our suite of premium tools. Designed for maximum revenue, efficiency, and customer satisfaction.
+                    </p>
+                </div>
+
+                <div id="ml-plugin-grid" class="ml-plugin-grid">
+                    <?php for ($i = 0; $i < 6; $i++): ?>
+                        <div class="ml-skeleton-card">
+                            <div class="ml-skeleton-pulse ml-skeleton-img"></div>
+                            <div class="ml-skeleton-body">
+                                <div class="ml-skeleton-pulse ml-skeleton-title"></div>
+                                <div class="ml-skeleton-pulse ml-skeleton-desc" style="width: 100%"></div>
+                                <div class="ml-skeleton-pulse ml-skeleton-desc" style="width: 85%"></div>
+                                <div class="ml-skeleton-pulse ml-skeleton-desc" style="width: 40%; margin-bottom: 32px;"></div>
+                                <div style="display: flex; gap: 12px; margin-top: auto;">
+                                    <div class="ml-skeleton-pulse ml-skeleton-action" style="flex: 1"></div>
+                                    <div class="ml-skeleton-pulse ml-skeleton-action" style="flex: 1"></div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endfor; ?>
+                </div>
+            </div>
+
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    const grid = document.getElementById('ml-plugin-grid');
+                    const apiUrl = '<?php echo $api_url; ?>';
+                    const nonce = '<?php echo $nonce; ?>';
+
+                    fetch(apiUrl, {
+                            headers: {
+                                'X-WP-Nonce': nonce
+                            }
+                        })
+                        .then(res => {
+                            console.log('MaxLimits API Response Status:', res.status);
+                            return res.json();
+                        })
+                        .then(res => {
+                            console.log('MaxLimits API Response Data:', res);
+                            if (res.success && res.data) {
+                                renderPlugins(res.data);
+                            } else {
+                                console.error('MaxLimits API Error:', res);
+                                grid.innerHTML = '<p style="grid-column: 1/-1; text-align: center; padding: 40px; color: #ef4444; background: #fee2e2; border-radius: 12px; font-weight: 600;">Failed to load plugins. Please check console for details.</p>';
+                            }
+                        })
+                        .catch(err => {
+                            console.error('MaxLimits API Fetch Error:', err);
+                            grid.innerHTML = '<p style="grid-column: 1/-1; text-align: center; padding: 40px; color: #ef4444; background: #fee2e2; border-radius: 12px; font-weight: 600;">Network error occurred while fetching plugins. Check console.</p>';
+                        });
+
+                    function renderPlugins(plugins) {
+                        grid.innerHTML = plugins.map(plugin => `
+                        <div class="ml-plugin-card anim-fade-in">
+                            <img src="${plugin.image}" alt="${plugin.title}" class="ml-plugin-img">
+                            <div class="ml-plugin-body">
+                                <h2 class="ml-plugin-title">${plugin.title}</h2>
+                                <p class="ml-plugin-desc">${plugin.description}</p>
+                                <div class="ml-plugin-actions">
+                                    ${plugin.button1 ? `
+                                        <a href="${plugin.button1.url}" target="_blank" rel="noopener noreferrer" class="ml-btn-primary">
+                                            ${plugin.button1.text} <span class="dashicons dashicons-external" style="font-size: 16px; width: 16px; height: 16px;"></span>
+                                        </a>
+                                    ` : ''}
+                                    ${plugin.button2 ? `
+                                        <a href="${plugin.button2.url}" target="_blank" rel="noopener noreferrer" class="ml-btn-secondary">
+                                            ${plugin.button2.text} <span class="dashicons dashicons-download" style="font-size: 16px; width: 16px; height: 16px;"></span>
+                                        </a>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                    }
+                });
+            </script>
+        </div>
+        <?php
+    }
+}
