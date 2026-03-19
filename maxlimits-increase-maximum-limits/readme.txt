@@ -4,7 +4,7 @@ Tags: max upload size, php limits, memory limit, execution time, max_input_vars
 Requires at least: 5.8
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.6.0
+Stable tag: 1.6.1
 License: GPL v2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Text Domain: maxlimits-increase-maximum-limits
@@ -26,7 +26,7 @@ MaxLimits is now a freemium plugin. While the core features remain 100% free, we
 *   **Standard Optimizer:** 1-Click setup for standard WordPress sites.
 *   **Live Server Status:** Monitor your server's actual limits in real-time.
 *   **Manual Code Generator:** Get `.htaccess` and `.user.ini` snippets for manual patching.
-*   **Direct File Writing:** Automate limit increases via `.htaccess` or `wp-config.php`.
+*   **Direct File Writing:** Automate limit increases via `.htaccess`.
 
 **PRO Version Features:**
 *   **Emergency Recovery Mode:** A standalone "Rescue Link" to fix your site in seconds even if WordPress crashes. 
@@ -63,6 +63,16 @@ MaxLimits first attempts to modify these settings at runtime using standard PHP 
 *Please note:* Some hosting providers may restrict this. For those hosts, you can enable the experimental **Direct .htaccess Writing** feature.
 The "Current Server Values" panel will always show you the limits your server is actually enforcing.
 This plugin is developed by **DominoPress**.
+
+**Check out our other WordPress Plugins:**
+
+*   **ShopCentral** - The ultimate Multi-Store Manager for WooCommerce. Manage products, orders, and analytics across your entire network from one central dashboard. ([Free Version](https://wordpress.org/plugins/shopcentral/) | [PRO Version](https://dominopress.com/plugin/shopcentral))
+*   **InsightPress** - Advanced analytics for WooCommerce. Track revenue, product performance, and customer behavior with beautiful, actionable dashboards. ([Free Version](https://wordpress.org/plugins/insightpress-advanced-analytics-for-woocommerce/) | [PRO Version](https://dominopress.com/plugin/insightpress))
+*   **Redirect Master** - Redirect Old Domain’s Traffic to New Domain. ([Get it Here](https://dominopress.com/plugin/redirect-master))
+*   **Autobute** - Auto image alt tags, title, caption etc. Image SEO Suit. ([Free Version](https://wordpress.org/plugins/autobute-auto-image-attribute-bulk-updater/))
+*   **PricePress** - Simple WooCommerce plugin for advanced, quantity-based pricing rules. ([Free Version](https://wordpress.org/plugins/pricepress-dynamic-pricing-for-woocommerce/))
+*   **ClaimPress** - Advanced Warranty, Return, Refund & Exchange for WooCommerce. Powerful warranty and claim management system for WooCommerce stores. ([Free Version](https://wordpress.org/plugins/claimpress-warranty-refunds-returns-for-woocommerce/) | [PRO Version](https://dominopress.com/plugin/claimpress))
+*   **DominoPost** - Advanced Post Editor & AI Writer. ([Free Version](https://wordpress.org/plugins/dominopost-advanced-post-editor/))
 
 == Installation ==
 
@@ -142,8 +152,14 @@ The optional "Direct .htaccess Writing" feature is **off by default** and only u
 
 == Changelog ==
 
+= 1.6.1 =
+* **Feature:** Deactivating or uninstalling the plugin now actively reverts and cleans up the server's limit configurations.
+* **Update:** Removed wp-config.php direct modification logic for a cleaner, native WordPress experience.
+* **Update:** Added cross-promotion links for DominoPress plugins.
+* **Update:** Version bump to 1.6.1.
+
 = 1.6.0 =
-* **Feature:** Enhanced logic for .htaccess and wp-config.php writing.
+* **Feature:** Enhanced logic for .htaccess writing.
 * **Feature:** Improved Live Server Status with target-value comparison.
 * **Feature:** Added automatic conflict resolution to purge legacy recovery rules.
 * **Update:** Version bump to 1.6.0.

@@ -53,4 +53,15 @@ delete_option('maxlimits_insights_consent');
 delete_option('maxlimits_install_event_sent');
 delete_option('maxlimits_version_tracked');
 delete_option('maxlimits_just_activated');
+delete_option('maxlimits_iml_settings');
+delete_option('maxlimits_iml_advanced');
 delete_transient('maxlimits_insights_notice_dismissed');
+
+// Clear .htaccess rules
+if (!function_exists('get_home_path')) {
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+}
+$htaccess_file = get_home_path() . '.htaccess';
+if (file_exists($htaccess_file) && is_writable($htaccess_file)) {
+    insert_with_markers($htaccess_file, 'MaxLimits', []);
+}
