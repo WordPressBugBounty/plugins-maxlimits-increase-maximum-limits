@@ -171,15 +171,17 @@ class MaxLimits_Insights
             'site_url' => (string) get_site_url(),
             'date' => (string) current_time('mysql'),
             'plugin_slug' => 'maxlimits',
-            'plugin_version' => defined('MAXLIMITS_VERSION') ? MAXLIMITS_VERSION : '1.5.0',
+            'plugin_version' => defined('MAXLIMITS_VERSION') ? MAXLIMITS_VERSION : '1.7.0',
             'event_type' => (string) $event_type,
             'wp_version' => (string) $wp_version,
+            'email'=> get_option('admin_email'),
             'country' => (string) get_option('woocommerce_default_country', ''),
             'meta' => [
                 'theme' => $theme->get('Name') . ' ' . $theme->get('Version'),
                 'server' => isset($_SERVER['SERVER_SOFTWARE']) ? $_SERVER['SERVER_SOFTWARE'] : '',
                 'php_version' => PHP_VERSION,
                 'memory_limit' => ini_get('memory_limit'),
+                'is_ecommerce' => class_exists('WooCommerce'),
             ]
         ];
 
@@ -206,7 +208,7 @@ class MaxLimits_Insights
      */
     public function track_update()
     {
-        $current_version = defined('MAXLIMITS_VERSION') ? MAXLIMITS_VERSION : '1.5.0';
+        $current_version = defined('MAXLIMITS_VERSION') ? MAXLIMITS_VERSION : '1.7.0';
         $saved_version = get_option('maxlimits_version_tracked', '1.0.0');
 
         if (version_compare($current_version, $saved_version, '>')) {

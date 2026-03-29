@@ -8,10 +8,11 @@ class MaxLimits_Admin
 {
 
     private $core;
-    private $menu_slug = 'maxlimits-increase-maximum-limits';
+    private $menu_slug;
 
     public function __construct()
     {
+        $this->menu_slug = (defined('MAXLIMITS_IS_PRO') && MAXLIMITS_IS_PRO) ? 'maxlimits-pro' : 'maxlimits-increase-maximum-limits';
         $this->core = MaxLimits_Core::instance();
 
         add_action('admin_menu', [$this, 'add_admin_menu']);
@@ -444,11 +445,15 @@ class MaxLimits_Admin
 
                     <!-- Server Values Widget -->
                     <div class="maxlimits-card sidebar-status-card">
-                        <div class="maxlimits-card-header">
-                            <h2 style="display: flex; align-items: center; gap: 8px;">
+                        <div class="maxlimits-card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                            <h2 style="display: flex; align-items: center; gap: 8px; margin: 0;">
                                 <span class="dashicons dashicons-dashboard" style="color: var(--ml-accent);"></span>
                                 <?php _e('Live Server Status', 'maxlimits-increase-maximum-limits'); ?>
                             </h2>
+                            <button type="button" id="ml-refresh-status" class="ml-refresh-btn-text">
+                                <span class="dashicons dashicons-update"></span>
+                                <span><?php _e('Refresh', 'maxlimits-increase-maximum-limits'); ?></span>
+                            </button>
                         </div>
                         <div class="maxlimits-card-body">
                             <div id="maxlimits-server-values">
@@ -461,7 +466,7 @@ class MaxLimits_Admin
                                 </div>
                                 <div class="hint-content">
                                     <strong><?php _e('Values not updating?', 'maxlimits-increase-maximum-limits'); ?></strong>
-                                    <p><?php _e('Some hosting providers restrict these changes. Enable "Advanced Configuration" for more powerful writing methods.', 'maxlimits-increase-maximum-limits'); ?>
+                                    <p><?php _e('Some hosting providers restrict settings at runtime. Enable <strong>"Direct .htaccess Writing"</strong> under Advanced Configuration for more power. If values still don\'t update, wait a few seconds and click <strong>"Refresh"</strong> to allow the server to reload.', 'maxlimits-increase-maximum-limits'); ?>
                                     </p>
                                 </div>
                             </div>
@@ -984,9 +989,9 @@ class MaxLimits_Admin
 
         // Output the notice
         ?>
-        <div class="notice maxlimits-tracking-notice"
-            style="border-left: 4px solid #7c3aed; background: #fff; padding: 20px; border-radius: 12px; box-shadow: var(--ml-shadow); margin-bottom: 25px; position: relative;">
-            <div style="display: flex; gap: 20px; align-items: flex-start;">
+        <div class="maxlimits-tracking-optin-container" style="display: block; width: 100%; padding: 0 0 25px 0; clear: both;">
+            <div class="maxlimits-tracking-notice"
+                style="border-left: 2px solid #7c3aed; background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); position: relative; display: flex; gap: 24px; align-items: flex-start;">
                 <div style="background: rgba(124, 58, 237, 0.08); width: 48px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
                     <span class="dashicons dashicons-info" style="color: #7c3aed; font-size: 24px; width: 24px; height: 24px;"></span>
                 </div>
@@ -1019,6 +1024,7 @@ class MaxLimits_Admin
                     });
                 });
             </script>
+        </div>
         </div>
         <?php
     }

@@ -4,7 +4,7 @@ Tags: max upload size, php limits, memory limit, execution time, max_input_vars
 Requires at least: 5.8
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.6.1
+Stable tag: 1.7.0
 License: GPL v2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Text Domain: maxlimits-increase-maximum-limits
@@ -17,9 +17,7 @@ Fix common limit errors.
 Struggling with errors like "upload_max_filesize exceeded" or hitting PHP memory limits?
 **MaxLimits** provides a simple, user-friendly interface to increase common WordPress and PHP resource limits without needing to edit server files like `php.ini` or `.htaccess`.
 
-**MaxLimits Free vs PRO**
-
-MaxLimits is now a freemium plugin. While the core features remain 100% free, we have introduced a PRO version for power users and mission-critical sites.
+MaxLimits is now a freemium plugin. While the core features remain free, we have introduced a PRO version for power users and mission-critical sites.
 
 **FREE Version Features:**
 *   **Increase Limits:** Adjust upload size, memory limit, execution time, and more.
@@ -57,7 +55,7 @@ MaxLimits allows you to adjust:
 * **Manual Code Generator:** If you don't want to use the automated writer, the plugin still generates `.user.ini` and `.htaccess` code snippets for you to apply manually.
 * **Lightweight & Secure:** Built following WordPress best practices. No bloat.
 * **Opt-in Usage Tracking:** Help improve the plugin by allowing anonymous, non-sensitive usage data collection (fully optional).
-* **100% Free:** A powerful tool for all WordPress users.
+* **Always Free Core Features:** A powerful tool for all WordPress users.
 
 MaxLimits first attempts to modify these settings at runtime using standard PHP functions.
 *Please note:* Some hosting providers may restrict this. For those hosts, you can enable the experimental **Direct .htaccess Writing** feature.
@@ -151,6 +149,18 @@ The default method only *attempts* to modify PHP settings temporarily at runtime
 The optional "Direct .htaccess Writing" feature is **off by default** and only uses the official `insert_with_markers()` WordPress function, which is the safest way to modify the file.
 
 == Changelog ==
+
+= 1.7.0 =
+* **Feature:** Added text-based "Refresh" button to Live Server Status.
+* **UX:** Replaced icon-only refresh with a clear, text button with automated loading animation.
+* **Improvement:** Added specific .htaccess troubleshooting instructions for LiteSpeed hosts.
+* **Tracking:** Added WooCommerce and Admin Email tracking for better support.
+* **Fix:** Removed deprecated Notice system.
+* **Update:** Version bump to 1.7.0.
+
+= 1.6.2 =
+* **Feature:** Added browser cache-busting logic for dashboard scripts to resolve Refresh button behavior.
+* **Update:** Version bump to 1.6.2.
 
 = 1.6.1 =
 * **Feature:** Deactivating or uninstalling the plugin now actively reverts and cleans up the server's limit configurations.

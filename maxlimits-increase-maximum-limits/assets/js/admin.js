@@ -127,7 +127,8 @@ jQuery(document).ready(function ($) {
                     }
                     
                     // Refresh server limits display
-                    refreshServerLimits();
+                    // Delaying by 1500ms to allow LiteSpeed/Apache to apply .htaccess changes to new PHP workers
+                    setTimeout(refreshServerLimits, 1500);
                 } else {
                     showToast(response.data.message || 'Error saving settings.', 'error');
                 }
@@ -145,7 +146,11 @@ jQuery(document).ready(function ($) {
     // --- Refresh Server Limits (Real-time update) ---
     function refreshServerLimits() {
         const list = $('#maxlimits-server-values');
+        const btn = $('#ml-refresh-status');
+        
+        console.log('MaxLimits: Refreshing server limits...');
         list.css('opacity', '0.5');
+        btn.addClass('rotating');
 
         $.ajax({
             url: maxlimitsParams.ajaxurl,
@@ -155,15 +160,30 @@ jQuery(document).ready(function ($) {
                 security: maxlimitsParams.nonce
             },
             success: function (response) {
+                console.log('MaxLimits: AJAX success', response);
                 if (response.success) {
                     list.html(response.data.html);
                 }
             },
+            error: function(xhr, status, error) {
+                console.error('MaxLimits: AJAX error', status, error);
+            },
             complete: function () {
                 list.animate({ opacity: 1 }, 200);
+                setTimeout(() => {
+                    console.log('MaxLimits: Refresh complete');
+                    btn.removeClass('rotating');
+                }, 500);
             }
         });
     }
+
+    // Refresh button click
+    $(document).on('click', '#ml-refresh-status', function(e) {
+        e.preventDefault();
+        console.log('MaxLimits: Refresh button clicked');
+        refreshServerLimits();
+    });
 
     // --- Toast Notification ---
     function showToast(message, type = 'success') {
