@@ -64,12 +64,12 @@ class MaxLimits_Core {
 	 */
 	public function get_limit_options() {
 		return [
-			'upload_max_filesize' => [ 'label'  => 'MB', 'values' => [ 32, 64, 128, 256, 512 ] ],
-			'post_max_size'       => [ 'label'  => 'MB', 'values' => [ 32, 64, 128, 256, 512 ] ],
-			'memory_limit'        => [ 'label'  => 'MB', 'values' => [ 128, 256, 512 ] ],
-			'max_execution_time'  => [ 'label'  => 'Seconds', 'values' => [ 300, 600 ] ],
-			'max_input_time'      => [ 'label'  => 'Seconds', 'values' => [ 300, 600 ] ],
-			'max_input_vars'      => [ 'label'  => 'Vars', 'values' => [ 1000, 3000 ] ],
+			'upload_max_filesize' => [ 'label'  => 'MB', 'values' => [ 32, 64, 128, 256, 512, 1024, 2048 ] ],
+			'post_max_size'       => [ 'label'  => 'MB', 'values' => [ 32, 64, 128, 256, 512, 1024, 2048 ] ],
+			'memory_limit'        => [ 'label'  => 'MB', 'values' => [ 128, 256, 512, 1024, 2048 ] ],
+			'max_execution_time'  => [ 'label'  => 'Seconds', 'values' => [ 300, 600, 1200, 3600 ] ],
+			'max_input_time'      => [ 'label'  => 'Seconds', 'values' => [ 300, 600, 1200, 3600 ] ],
+			'max_input_vars'      => [ 'label'  => 'Vars', 'values' => [ 1000, 3000, 5000, 10000, 20000 ] ],
 		];
 	}
 

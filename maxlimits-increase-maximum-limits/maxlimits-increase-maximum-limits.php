@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       MaxLimits - Increase Maximum Upload, Post & PHP Limits
  * Description:       Easily increase max upload size, post size, and PHP limits. A user-friendly solution for common WordPress limit issues.
- * Version:           1.7.0
+ * Version:           1.8.0
  * Author:            DominoPress
  * Author URI:        https://dominopress.com
  * License:           GPL v2 or later
@@ -11,7 +11,7 @@
  * Requires at least: 5.8
  * Requires PHP:      7.4
  * Tested up to:      6.9
- * Stable tag:        1.7.0
+ * Stable tag:        1.8.0
  * Tags:              max upload size, php limits, memory limit, execution time, max_input_vars
  */
 
@@ -23,7 +23,7 @@ if (!defined('ABSPATH')) {
 
 
 
-define('MAXLIMITS_VERSION', '1.7.0');
+define('MAXLIMITS_VERSION', '1.8.0');
 define('MAXLIMITS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('MAXLIMITS_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('MAXLIMITS_PLUGIN_BASENAME', plugin_basename(__FILE__));
@@ -39,6 +39,12 @@ MaxLimits_Core::instance();
 
 // Initialize Insights (Tracking)
 new MaxLimits_Insights();
+
+// Initialize Promoter (Cross-promotion)
+if ( file_exists( MAXLIMITS_PLUGIN_DIR . 'includes/class-maxlimits-promoter.php' ) ) {
+    require_once MAXLIMITS_PLUGIN_DIR . 'includes/class-maxlimits-promoter.php';
+    new MaxLimits_Promoter();
+}
 
 // Initialize Admin UI
 new MaxLimits_Admin();
@@ -63,9 +69,27 @@ function maxlimits_add_action_links($links)
 
 
 // --- ACTIVATION & TRACKING ---
+/**
+ * Activation Hook
+ */
 register_activation_hook(__FILE__, 'maxlimits_activate');
-function maxlimits_activate()
-{
+function maxlimits_activate() {
+    // Set first activation time if not set (for promoter rotation)
+    if (!get_option('maxlimits_first_activated')) {
+        update_option('maxlimits_first_activated', time());
+    }
+
+    // Set default settings if they don't exist
+    if (!get_option('maxlimits_iml_settings')) {
+        update_option('maxlimits_iml_settings', [
+            'upload_max_filesize' => '128',
+            'post_max_size'       => '128',
+            'memory_limit'        => '512',
+            'max_execution_time'  => '300',
+            'max_input_time'      => '300',
+            'max_input_vars'      => '3000',
+        ]);
+    }
 	// Indicate that the plugin has just been activated (for tracking)
 	update_option('maxlimits_just_activated', 'yes');
 

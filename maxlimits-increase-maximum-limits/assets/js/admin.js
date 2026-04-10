@@ -26,15 +26,7 @@ jQuery(document).ready(function ($) {
             const customInput = wrapper.find('.maxlimits-custom-input');
             let previousValue = select.val();
 
-            function update(showModal = true) {
-                const is_pro = select.find('option:selected').data('pro');
-                
-                if (is_pro && showModal) {
-                    showUpgradeModal('Custom limits are only available in the PRO version.');
-                    select.val(previousValue); // Revert
-                    return;
-                }
-
+            function update() {
                 previousValue = select.val();
 
                 if (select.val() === 'custom') {
@@ -47,9 +39,9 @@ jQuery(document).ready(function ($) {
             }
 
             select.on('change', function() {
-                update(true);
+                update();
             });
-            update(false); // Init without showing modal
+            update(); // Init status
         });
     }
     handleCustomInputs();

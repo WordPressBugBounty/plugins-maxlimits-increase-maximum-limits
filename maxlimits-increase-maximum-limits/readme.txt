@@ -4,34 +4,34 @@ Tags: max upload size, php limits, memory limit, execution time, max_input_vars
 Requires at least: 5.8
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.7.0
+Stable tag: 1.8.0
 License: GPL v2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 Text Domain: maxlimits-increase-maximum-limits
 
-Easily increase max upload size, post size, PHP memory limit, and execution time directly from your WordPress dashboard.
-Fix common limit errors.
+Easily understand how to increase wordpress memory limit, how to increase upload limit in wordpress, and how to increase php limit in wordpress directly from your dashboard.
 
 == Description ==
 
-Struggling with errors like "upload_max_filesize exceeded" or hitting PHP memory limits?
-**MaxLimits** provides a simple, user-friendly interface to increase common WordPress and PHP resource limits without needing to edit server files like `php.ini` or `.htaccess`.
+If you are struggling with errors like "upload_max_filesize exceeded" or "Allowed memory size exhausted", you need to know **how to increase php limit in wordpress**. 
 
-MaxLimits is now a freemium plugin. While the core features remain free, we have introduced a PRO version for power users and mission-critical sites.
+**MaxLimits** is a powerful yet simple tool designed for users who want to know **how to increase php time limit in wordpress** or **how to increase wp memory limit in wordpress** without touching a single line of code. No more editing `wp-config.php`, `php.ini`, or `.htaccess` manually.
+
+### Why MaxLimits?
+Whether you're running a heavy WooCommerce store or using a page builder like Elementor, knowing **how to increase wordpress memory limit** is essential for site stability. MaxLimits automates this process for you.
+
+MaxLimits makes it easy to understand **how to increase upload limit in wordpress** and increase wordpress maximum upload file size up to 2GB.
 
 **FREE Version Features:**
-*   **Increase Limits:** Adjust upload size, memory limit, execution time, and more.
-*   **Standard Optimizer:** 1-Click setup for standard WordPress sites.
-*   **Live Server Status:** Monitor your server's actual limits in real-time.
-*   **Manual Code Generator:** Get `.htaccess` and `.user.ini` snippets for manual patching.
-*   **Direct File Writing:** Automate limit increases via `.htaccess`.
+*   **Custom Limits:** Set specific values for upload size, memory, and more (Now Free!).
+*   **High Performance Suggestions:** Choose from pre-defined high-limit values.
+*   **Direct .htaccess Writing:** Bypass hosting restrictions by writing rules directly.
+*   **Live Server Monitor:** Real-time visibility into your PHP environment.
 
 **PRO Version Features:**
-*   **Emergency Recovery Mode:** A standalone "Rescue Link" to fix your site in seconds even if WordPress crashes. 
-*   **Advanced 1-Click Optimizers:** Instant setup for WooCommerce, Elementor, Divi, and "Maximum Power" modes.
-*   **Custom Limit Values:** Set any specific value you want for your resource limits.
-*   **Export/Import Settings**: Move your high-performance configurations between sites.
-*   **Priority Support**: Get direct help from the developers at DominoPress.
+*   **Emergency Recovery Mode:** A "Rescue Link" to fix your site instantly even if you are locked out of the dashboard.
+*   **Advanced 1-Click Optimizers:** Specific "High Power" modes for WooCommerce and heavy builders.
+*   **Priority Support:** Get direct assistance from the developers at DominoPress.
 
 MaxLimits allows you to adjust:
 
@@ -149,6 +149,13 @@ The default method only *attempts* to modify PHP settings temporarily at runtime
 The optional "Direct .htaccess Writing" feature is **off by default** and only uses the official `insert_with_markers()` WordPress function, which is the safest way to modify the file.
 
 == Changelog ==
+
+= 1.8.0 =
+* **Feature:** Made "Custom" resource limits completely FREE for all users.
+* **UI:** Simplified the "Values not updating?" hint box for better clarity.
+* **Improvement:** Added higher limit suggestions (up to 2GB/3600s) for advanced users.
+* **SEO:** Optimized plugin description for search visibility and keyword rankings.
+* **Update:** Version bump to 1.8.0.
 
 = 1.7.0 =
 * **Feature:** Added text-based "Refresh" button to Live Server Status.

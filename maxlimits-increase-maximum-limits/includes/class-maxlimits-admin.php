@@ -465,8 +465,8 @@ class MaxLimits_Admin
                                     <span class="dashicons dashicons-info"></span>
                                 </div>
                                 <div class="hint-content">
-                                    <strong><?php _e('Values not updating?', 'maxlimits-increase-maximum-limits'); ?></strong>
-                                    <p><?php _e('Some hosting providers restrict settings at runtime. Enable <strong>"Direct .htaccess Writing"</strong> under Advanced Configuration for more power. If values still don\'t update, wait a few seconds and click <strong>"Refresh"</strong> to allow the server to reload.', 'maxlimits-increase-maximum-limits'); ?>
+                                    <strong><?php _e('Still seeing old limits?', 'maxlimits-increase-maximum-limits'); ?></strong>
+                                    <p><?php _e('Some hosts require <strong>"Direct .htaccess Writing"</strong> (find it in the Advanced tab). If already enabled, wait 5 seconds and click <strong>"Refresh"</strong> to update the display.', 'maxlimits-increase-maximum-limits'); ?>
                                     </p>
                                 </div>
                             </div>
@@ -568,8 +568,8 @@ class MaxLimits_Admin
                             <?php echo esc_html($val); ?>
                         </option>
                     <?php endforeach; ?>
-                    <option value="custom" <?php selected($select_val, 'custom'); ?> <?php echo (defined('MAXLIMITS_IS_PRO') && MAXLIMITS_IS_PRO) ? '' : 'data-pro="true"'; ?>>
-                        <?php _e('Custom', 'maxlimits-increase-maximum-limits'); ?><?php echo (defined('MAXLIMITS_IS_PRO') && MAXLIMITS_IS_PRO) ? '' : ' (PRO)'; ?>
+                    <option value="custom" <?php selected($select_val, 'custom'); ?>>
+                        <?php _e('Custom', 'maxlimits-increase-maximum-limits'); ?>
                     </option>
                 </select>
 
